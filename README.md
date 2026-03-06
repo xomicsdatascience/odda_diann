@@ -5,5 +5,5 @@ The repository holds code for creating Apptainer instance of DIA-NN and making t
 ## Installation
 
 ```bash
-pip install .
+pip install https://github.com/xomicsdatascience/odda_diann
 ```
