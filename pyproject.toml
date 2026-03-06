@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Apptainer containers made accessible via MCP server."
 readme = "README.md"
 requires-python = ">=3.11"
-license = {text = "MIT"}
+license = {text = "GPLv3"}
 authors = [
     {name = "Alexandre Hutton", email = "alexandre.hutton@proton.me"},
 ]
