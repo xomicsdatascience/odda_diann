@@ -1,0 +1,183 @@
+# DIA-NN MCP Server
+#
+# Provides MCP tools for running DIA-NN proteomics software via Apptainer
+# containers and listing available DIA-NN versions.
+
+from odda_utils.async_exec import execute_process
+from odda_diann import diann_instance_format
+from typing import Optional, List, Dict, Any, Union
+import asyncio
+import contextlib
+import os
+import re
+from mcp.server.fastmcp import FastMCP
+
+apptainer_diann_command = "apptainer run " + diann_instance_format
+
+app = FastMCP("diann_multiversion")
+
+@app.tool()
+async def run_diann(env: Optional[dict] = None,
+              version: Optional[str] = "2.3.1",
+              timeout_sec: Optional[int] = None,
+              args: Optional[List[str]] = None):
+    """
+    Run the specified version of DIA-NN using the specified arguments. DIA-NN is run via an Apptainer instance.
+    Parameters
+    ----------
+    env : dict
+        Environment variables to set; overrides current environment.
+    version : str
+        Version of DIA-NN to run.
+    timeout_sec : int
+        Time in seconds before killing the process.
+    args : list
+        List of arguments to pass to DIA-NN.
+
+    Returns
+    -------
+
+    """
+    exec_env = os.environ.copy()
+    if env:
+        exec_env.update({str(k): str(v) for k, v in env.items()})
+    cmd = apptainer_diann_command.format(version=version).split(" ")
+    if args:
+        cmd.extend(args)
+    return await execute_process(cmd,
+                           env=exec_env,
+                           timeout_sec=timeout_sec)
+
+
+@app.tool()
+async def list_diann_versions(
+    timeout_sec: Optional[float] = 10.0,
+) -> Dict[str, Any]:
+    """
+    List available DIA-NN versions by examining running Apptainer instances.
+
+    Queries the list of running Apptainer/Singularity instances and extracts
+    version information from instances with names matching the pattern "diann_v*".
+    For example, an instance named "diann_v1.8.1" would return version "1.8.1".
+
+    Parameters
+    ----------
+    timeout_sec : Optional[float]
+        Timeout in seconds for the instance list command. Default is 10.0.
+
+    Returns
+    -------
+    Dict[str, Any]
+        A dictionary containing:
+        - ok (bool): Whether the operation succeeded.
+        - versions (List[str]): List of available DIA-NN version strings.
+        - instance_names (List[str]): Full instance names matching diann_v* pattern.
+        - container_runtime (str): Which runtime was used (apptainer/singularity).
+        - error (str, optional): Error message if the operation failed.
+    """
+    diann_pattern = re.compile(r"^diann_v(.+)$")
+
+    for container_cmd in ["apptainer", "singularity"]:
+        cmd = [container_cmd, "instance", "list"]
+
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+
+            try:
+                stdout_b, stderr_b = (
+                    await asyncio.wait_for(proc.communicate(), timeout=timeout_sec)
+                    if timeout_sec
+                    else await proc.communicate()
+                )
+            except asyncio.TimeoutError:
+                with contextlib.suppress(ProcessLookupError):
+                    proc.kill()
+                continue
+
+            if proc.returncode != 0:
+                continue
+
+            stdout_str = stdout_b.decode(errors="replace")
+            versions: List[str] = []
+            instance_names: List[str] = []
+
+            for line in stdout_str.strip().split("\n"):
+                if not line.strip() or line.startswith("INSTANCE NAME"):
+                    continue
+
+                parts = line.split()
+                if not parts:
+                    continue
+
+                instance_name = parts[0]
+                match = diann_pattern.match(instance_name)
+                if match:
+                    version = match.group(1)
+                    versions.append(version)
+                    instance_names.append(instance_name)
+
+            return {
+                "ok": True,
+                "versions": versions,
+                "instance_names": instance_names,
+                "container_runtime": container_cmd,
+            }
+
+        except FileNotFoundError:
+            continue
+
+    return {
+        "ok": False,
+        "versions": [],
+        "instance_names": [],
+        "error": (
+            "Failed to list container instances. "
+            "Ensure 'apptainer' or 'singularity' is installed and accessible."
+        ),
+    }
+
+@app.tool()
+async def get_diann_argument_info(arg: Optional[Union[str, List[str]]] = None):
+    """
+    Provides a description of the arguments available for DIA-NN. If the function is called without arguments, the full
+    list of parameters is returned. If called with a single argument, this function returns a description of the
+    specified argument. If called with a list of arguments, the function returns a description for each argument.
+    Parameters
+    ----------
+    arg : Optional[Union[str, List[str]]]
+        The argument or list of arguments for which information is requested.
+
+    Returns
+    -------
+    str
+        Description string of the requested argument(s).
+    """
+    if arg is None or len(arg) == 0:
+        from diann import diann_all_arguments
+        return diann_all_arguments
+    else:
+        from diann import diann_argument_dict
+        if isinstance(arg, str):
+            arg = [arg]
+        l = ""
+        not_found = []
+        for a in arg:
+            if a not in diann_argument_dict:
+                not_found.append(a)
+                continue
+            l += diann_argument_dict[a] + "\n"
+        if not_found:
+            n = "\n"
+            return l + f"\n\nThe following arguments were not found: {n.join(not_found)}"
+    return ""
+
+
+def main():
+    app.run()
+
+if __name__ == "__main__":
+    main()

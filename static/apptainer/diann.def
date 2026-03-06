@@ -1,0 +1,42 @@
+Bootstrap: docker
+From: {{ OS }}:{{ OS_VERSION }}
+Stage: build
+
+%arguments
+    OS=ubuntu
+    OS_VERSION=22.04
+    DIANN_VERSION={{ 2.3.1 }}
+    DIANN_ZIP=DIA-NN-{{ DIANN_VERSION }}-Academia-Linux.zip
+
+%files
+    {{ DIANN_ZIP }} /diann_binary.zip
+
+%environment
+    export LC_ALL=C
+    export PATH=${PATH}:/diann/
+
+%post
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update
+    apt-get install -y wget curl ca-certificates unzip bzip2 gnupg software-properties-common libgomp1 locales
+    add-apt-repository universe
+    
+    # Unzip diann binary
+    unzip /diann_binary.zip -d /
+    mv /diann-{{ DIANN_VERSION }} /diann/
+    rm /diann_binary.zip
+    chmod -R u+x /diann/
+    export PATH=${PATH}:/diann/
+    
+%runscript
+    /diann/diann-linux $@
+
+%startscript
+    echo "Container for DIA-NN {{ DIANN_VERSION }} is now online."
+    	
+%labels
+    Author alexandre.hutton@cshs.org
+    Version v0.0.1
+
+%help
+    Container for running DIA-NN version {{ DIANN_VERSION }}
