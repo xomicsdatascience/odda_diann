@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+
+# Built containers (do NOT distribute)
+*.sif
+
+# License-restricted tool binaries / downloads (do NOT distribute)
+static/apptainer/DIA-NN-*.zip
+static/apptainer/DIA-NN-*/
+
+# Local data / secrets
+*.sqlite
+*.sqlite-journal
+.env
+*.key

@@ -16,9 +16,62 @@ apptainer_diann_command = "apptainer run " + diann_instance_format
 
 app = FastMCP("diann_multiversion")
 
+
+def _version_sort_key(version: str):
+    """
+    Build a sort key for a dotted numeric version string.
+
+    Parameters
+    ----------
+    version : str
+        Version string such as "2.6.1".
+
+    Returns
+    -------
+    tuple
+        Tuple of integer components; unparseable versions sort lowest.
+    """
+    try:
+        return tuple(int(part) for part in version.split("."))
+    except ValueError:
+        return (-1,)
+
+
+async def _resolve_version(version: Optional[str]) -> Dict[str, Any]:
+    """
+    Resolve the DIA-NN version to run, discovering it dynamically if not given.
+
+    Parameters
+    ----------
+    version : Optional[str]
+        Explicit bare version string (e.g. "2.6.1"), or None to auto-discover
+        the newest running instance via ``list_diann_versions``.
+
+    Returns
+    -------
+    Dict[str, Any]
+        ``{"ok": True, "version": <str>}`` on success, otherwise
+        ``{"ok": False, "error": <str>}``.
+    """
+    if version:
+        return {"ok": True, "version": version}
+    listing = await list_diann_versions()
+    versions = listing.get("versions") or []
+    if not versions:
+        return {
+            "ok": False,
+            "error": (
+                "No DIA-NN version specified and none could be discovered from "
+                "running Apptainer instances. Start an instance (e.g. diann_v2.6.1) "
+                "or pass an explicit version string."
+            ),
+        }
+    return {"ok": True, "version": max(versions, key=_version_sort_key)}
+
+
 @app.tool()
 async def run_diann(env: Optional[dict] = None,
-              version: Optional[str] = "2.3.1",
+              version: Optional[str] = None,
               timeout_sec: Optional[int] = None,
               args: Optional[List[str]] = None):
     """
@@ -27,8 +80,10 @@ async def run_diann(env: Optional[dict] = None,
     ----------
     env : dict
         Environment variables to set; overrides current environment.
-    version : str
-        Version of DIA-NN to run.
+    version : str, optional
+        Bare version of DIA-NN to run (e.g. "2.6.1"). If omitted (None), the
+        newest version among running Apptainer instances is auto-discovered via
+        ``list_diann_versions``.
     timeout_sec : int
         Time in seconds before killing the process.
     args : list
@@ -41,7 +96,10 @@ async def run_diann(env: Optional[dict] = None,
     exec_env = os.environ.copy()
     if env:
         exec_env.update({str(k): str(v) for k, v in env.items()})
-    cmd = apptainer_diann_command.format(version=version).split(" ")
+    resolved = await _resolve_version(version)
+    if not resolved["ok"]:
+        return resolved
+    cmd = apptainer_diann_command.format(version=resolved["version"]).split(" ")
     if args:
         cmd.extend(args)
     return await execute_process(cmd,
@@ -157,10 +215,10 @@ async def get_diann_argument_info(arg: Optional[Union[str, List[str]]] = None):
         Description string of the requested argument(s).
     """
     if arg is None or len(arg) == 0:
-        from diann import diann_all_arguments
+        from odda_diann import diann_all_arguments
         return diann_all_arguments
     else:
-        from diann import diann_argument_dict
+        from odda_diann import diann_argument_dict
         if isinstance(arg, str):
             arg = [arg]
         l = ""
@@ -172,8 +230,8 @@ async def get_diann_argument_info(arg: Optional[Union[str, List[str]]] = None):
             l += diann_argument_dict[a] + "\n"
         if not_found:
             n = "\n"
-            return l + f"\n\nThe following arguments were not found: {n.join(not_found)}"
-    return ""
+            l += f"\n\nThe following arguments were not found: {n.join(not_found)}"
+        return l
 
 
 def main():
